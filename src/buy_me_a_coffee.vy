@@ -1,0 +1,94 @@
+# pragma version 0.4.3
+# pragma enable-decimals
+"""
+@license MIT
+@title A sample buy-me-a-coffee contract
+@author You!
+@notice This contract is for creating a sample funding contract
+"""
+interface AggregatorV3Interface:
+    def latestRoundData() -> (uint80, int256, uint256, uint256, uint80): view
+    def version() -> uint256: view
+# import get_price_module
+
+MINIMUM_USD: public(constant(uint256)) = 5 * (10**18)
+OWNER: public(immutable(address))
+PRICE_FEED: public(immutable(AggregatorV3Interface))
+
+funders: public(DynArray[address, 100])
+address_to_amount_funded: public(HashMap[address, uint256])
+
+
+@deploy
+def __init__(price_feed: address):
+    PRICE_FEED = AggregatorV3Interface(price_feed)
+    OWNER = msg.sender
+
+
+@internal
+def _only_owner():
+    assert msg.sender == OWNER, "Not the contract owner"
+
+
+@external
+@payable
+def fund():
+    usd_value_of_eth: uint256 = self._get_eth_to_usd_rate(PRICE_FEED, msg.value)
+    assert usd_value_of_eth >= MINIMUM_USD, "You need to spend more ETH!"
+    self.address_to_amount_funded[msg.sender] += msg.value
+    self.funders.append(msg.sender)
+
+
+@external
+def withdraw():
+    self._only_owner()
+    for funder: address in self.funders:
+        self.address_to_amount_funded[funder] = 0
+    self.funders = []
+    raw_call(OWNER, b"", value=self.balance)
+
+
+@external
+@view
+def get_version() -> uint256:
+    return staticcall PRICE_FEED.version()
+
+
+PRECISION: constant(uint256) = 1 * (10**18)
+
+@internal
+@view
+def _get_eth_to_usd_rate(price_feed: AggregatorV3Interface, eth_amount: uint256) -> uint256:
+    # Check the conversion rate
+# This combines declaration and assignment into one tracked line
+    a: uint80 = 0
+    price: int256 = 0
+    b: uint256 = 0
+    c: uint256 = 0
+    d: uint80 = 0
+    (a, price, b, c, d) = staticcall price_feed.latestRoundData()    # We know the price has 8 decimals, so we need to add 10
+    eth_price: uint256 = (convert(price, uint256)) * (10**10)
+    eth_amount_in_usd: uint256 = (eth_price * eth_amount) // PRECISION
+    return eth_amount_in_usd
+
+
+@external
+@view
+def get_funder(index: uint256) -> address:
+    return self.funders[index]
+
+@external
+@view
+def get_eth_to_usd_rate(eth_amount: uint256) -> uint256:
+    return self._get_eth_to_usd_rate(PRICE_FEED, eth_amount)
+
+@external
+@view
+def get_owner() -> address:
+    return OWNER
+
+
+@external
+@payable
+def __default__():
+    pass
